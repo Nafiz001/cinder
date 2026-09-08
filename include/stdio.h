@@ -28,6 +28,13 @@ int snprintf(char *buf, size_t n, const char *fmt, ...);
 int scanf(const char *fmt, ...);
 int sscanf(const char *s, const char *fmt, ...);
 
+// The v- forms take an already-started argument list. va_list is char* here,
+// spelled out rather than included, so that stdio.h does not drag in stdarg.h.
+int vprintf(const char *fmt, char *ap);
+int vfprintf(FILE *stream, const char *fmt, char *ap);
+int vsprintf(char *buf, const char *fmt, char *ap);
+int vsnprintf(char *buf, size_t n, const char *fmt, char *ap);
+
 int puts(const char *s);
 int putchar(int c);
 int getchar(void);

@@ -14,6 +14,11 @@ char *strchr(const char *s, int c);
 char *strrchr(const char *s, int c);
 char *strstr(const char *haystack, const char *needle);
 char *strdup(const char *s);
+
+// POSIX rather than ISO C, but MinGW's runtime provides both spellings and
+// cinder's own source uses the case-insensitive compare.
+int strcasecmp(const char *a, const char *b);
+int strncasecmp(const char *a, const char *b, size_t n);
 char *strerror(int errnum);
 
 void *memcpy(void *dst, const void *src, size_t n);

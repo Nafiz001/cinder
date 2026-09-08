@@ -244,6 +244,7 @@ typedef enum {
   ND_NUM,       // numeric literal
   ND_CAST,      // type cast
   ND_MEMZERO,   // zero-fill a local, for partial initialisers
+  ND_VA_START,  // __builtin_va_start
 } NodeKind;
 
 struct Node {

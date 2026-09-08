@@ -608,6 +608,21 @@ static void gen_expr(Node *node) {
     cast(node->lhs->ty, node->ty);
     return;
 
+  case ND_VA_START: {
+    // va_list is a pointer to the next argument's home slot. The named
+    // parameters occupy the first ones, so the variable part starts just past
+    // them, at rbp + 16 + nparams*8 -- 16 for the saved RBP and the return
+    // address.
+    int nparams = 0;
+    for (Obj *p = current_fn->params; p; p = p->next)
+      nparams++;
+
+    gen_addr(node->lhs);
+    println("  lea %d(%%rbp), %%rdi", 16 + nparams * 8);
+    println("  mov %%rdi, (%%rax)");
+    return;
+  }
+
   case ND_MEMZERO:
     // Clear a local before its explicit initialisers run, so that a partial
     // initialiser leaves the rest zero without emitting a store per element.
@@ -1067,9 +1082,15 @@ static void emit_text(Obj *prog, FILE *out) {
       println("  .globl %s", fn->name);
 
     println("  .text");
-    // The .def block is what makes the linker treat the symbol as a function
-    // rather than data, which COFF cares about and ELF does not.
-    println("  .def %s; .scl 2; .type 32; .endef", fn->name);
+    // The .def block tells COFF that this symbol is a function rather than
+    // data, which ELF infers and COFF does not.
+    //
+    // The storage class matters as much as omitting .globl does: 2 is
+    // IMAGE_SYM_CLASS_EXTERNAL and 3 is IMAGE_SYM_CLASS_STATIC. Emitting 2 for
+    // a static function makes it visible to the linker anyway, so two
+    // translation units that each define their own `static cast` collide.
+    println("  .def %s; .scl %d; .type 32; .endef", fn->name,
+            fn->is_static ? 3 : 2);
     println("%s:", fn->name);
     current_fn = fn;
 
@@ -1083,6 +1104,15 @@ static void emit_text(Obj *prog, FILE *out) {
     // uses it freely as a scratch register, so it must be preserved here.
     println("  push %%rdi");
     println("  push %%rsi");
+
+    // A variadic function spills its four register arguments into the home
+    // slots the caller reserved, so that va_list can simply walk forward
+    // through them. The ABI requires the caller to reserve that space but not
+    // to fill it, so the callee cannot assume it is already there.
+    if (fn->va_area) {
+      for (int i = 0; i < GP_MAX; i++)
+        println("  mov %s, %d(%%rbp)", argreg64[i], 16 + i * 8);
+    }
 
     // Spill the register arguments into their stack homes. Every parameter is
     // addressed through the frame from here on, which is what lets `&param`

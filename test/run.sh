@@ -17,7 +17,7 @@ set -u
 
 cd "$(dirname "$0")/.."
 
-CINDER=./cinder.exe
+CINDER=${CINDER:-./cinder.exe}
 TMP="${TEMP:-/tmp}/cinder-test-$$"
 mkdir -p "$TMP"
 trap 'rm -rf "$TMP"' EXIT

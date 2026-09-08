@@ -92,6 +92,7 @@ static char *cont_label;
 static Node *current_switch;
 
 static bool is_typename(Token *tok);
+static void skip_attributes(Token **rest, Token *tok);
 static Type *declspec(Token **rest, Token *tok, VarAttr *attr);
 static Type *typename(Token **rest, Token *tok);
 static Type *enum_specifier(Token **rest, Token *tok);
@@ -294,6 +295,33 @@ static Type *find_typedef(Token *tok) {
   return NULL;
 }
 
+// __attribute__((...)) and __declspec(...) carry no meaning for cinder, which
+// does not implement any of them. They are skipped by matching parentheses
+// rather than by parsing, because the contents are an open-ended vocabulary
+// and the alternative is failing on any code that uses one.
+static void skip_attributes(Token **rest, Token *tok) {
+  for (;;) {
+    if (equal(tok, "__attribute__") || equal(tok, "__declspec") ||
+        equal(tok, "__extension__")) {
+      tok = tok->next;
+      if (!equal(tok, "(")) {
+        continue;
+      }
+      int level = 0;
+      do {
+        if (equal(tok, "("))
+          level++;
+        else if (equal(tok, ")"))
+          level--;
+        tok = tok->next;
+      } while (level > 0 && tok->kind != TK_EOF);
+      continue;
+    }
+    break;
+  }
+  *rest = tok;
+}
+
 //
 // Declaration specifiers
 //
@@ -324,6 +352,10 @@ static Type *declspec(Token **rest, Token *tok, VarAttr *attr) {
   int counter = 0;
 
   while (is_typename(tok)) {
+    skip_attributes(&tok, tok);
+    if (!is_typename(tok))
+      break;
+
     // Storage class specifiers.
     if (equal(tok, "typedef") || equal(tok, "static") || equal(tok, "extern") ||
         equal(tok, "inline")) {
@@ -933,8 +965,11 @@ static void array_initializer(Token **rest, Token *tok, Initializer *init) {
       skip_excess_element(&tok, tok);
   }
 
-  if (has_brace)
-    tok = skip(tok, "}");
+  // consume_end rather than skip("}"), because the loop stops at `,` when the
+  // list has a trailing comma -- `{1, 2, 3,}` -- and the brace is one token
+  // further along.
+  if (has_brace && !consume_end(&tok, tok))
+    error_tok(tok, "expected '}'");
   *rest = tok;
 }
 
@@ -1281,6 +1316,10 @@ static bool is_typename(Token *tok) {
         "struct",   "union",  "typedef",  "enum",     "static",   "extern",
         "signed",   "unsigned", "const",  "volatile", "auto",     "register",
         "restrict", "float",  "double",   "inline",   "_Alignas", "_Noreturn",
+        // Not type specifiers, but they may stand where one is expected. If
+        // is_typename rejected them the specifier loop would never start, and
+        // the attribute would never be skipped.
+        "__attribute__", "__declspec", "__extension__",
     };
     for (int i = 0; i < sizeof(kw) / sizeof(*kw); i++)
       hashmap_put(&map, kw[i], (void *)1);
@@ -2335,8 +2374,43 @@ static Node *primary(Token **rest, Token *tok) {
     return node;
   }
 
+  // A compound literal: (struct T){...}. It denotes an anonymous object, with
+  // static storage at file scope and automatic storage inside a function --
+  // which is the whole reason it cannot simply be an expression.
+  if (equal(tok, "(") && is_typename(tok->next)) {
+    Type *ty = typename(&tok, tok->next);
+    tok = skip(tok, ")");
+
+    if (scope->next == NULL) {
+      Obj *var = new_anon_gvar(ty);
+      gvar_initializer(rest, tok, var);
+      return new_var_node(var, start);
+    }
+
+    Obj *var = new_lvar("", ty);
+    Node *lhs = lvar_initializer(rest, tok, var);
+    Node *rhs = new_var_node(var, tok);
+    return new_binary(ND_COMMA, lhs, rhs, start);
+  }
+
   if (equal(tok, "(")) {
     Node *node = expr(&tok, tok->next);
+    *rest = skip(tok, ")");
+    return node;
+  }
+
+  // va_start is the one part of <stdarg.h> that cannot be written in C: it has
+  // to know where this function's arguments were left. va_arg and va_end are
+  // ordinary macros in the bundled header.
+  if (equal(tok, "__builtin_va_start")) {
+    Node *node = new_node(ND_VA_START, tok);
+    tok = skip(tok->next, "(");
+    node->lhs = assign(&tok, tok);
+    // The second argument names the last fixed parameter. cinder does not need
+    // it -- the count of named parameters is already known -- but it is
+    // accepted so that the standard spelling compiles.
+    if (equal(tok, ","))
+      assign(&tok, tok->next);
     *rest = skip(tok, ")");
     return node;
   }
@@ -2514,8 +2588,12 @@ static Token *function(Token *tok, Type *basety, VarAttr *attr) {
 
   fn->params = locals;
 
+  // Nothing needs to be reserved for the variable arguments: on Windows they
+  // are already in the caller's outgoing area, contiguous with the named ones,
+  // which is why va_list here is a plain pointer rather than the register-save
+  // structure System V requires.
   if (ty->is_variadic)
-    fn->va_area = new_lvar("__va_area__", array_of(ty_char, 96));
+    fn->va_area = (Obj *)1;
 
   tok = skip(tok, "{");
   fn->body = compound_stmt(&tok, tok);
