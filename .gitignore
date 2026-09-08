@@ -1,0 +1,8 @@
+cinder.exe
+cinder
+*.o
+*.obj
+*.s
+*.exe
+a.out
+tmp/
