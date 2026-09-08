@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  # cinder targets the Microsoft x64 ABI, so its output only runs on Windows.
+  # The differential suite and the self-host test both need to execute what
+  # was compiled, so they belong here rather than on a Linux runner.
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: ./build.sh
+
+      - name: Differential tests against gcc
+        run: bash test/run.sh
+
+      - name: Diagnostics tests
+        run: bash test/errors.sh
+
+      - name: Self-host to a fixed point
+        run: bash test/selfhost.sh
+
+  # cinder's own source is portable C11 even though its output is not, so it is
+  # worth knowing that it still builds warning-clean elsewhere.
+  build-portability:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build only
+        run: |
+          gcc -std=c11 -O2 -Wall -Wno-switch -Wno-unused-function \
+              -o cinder src/*.c
+          ./cinder --help

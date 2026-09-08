@@ -739,8 +739,14 @@ static Node *declaration(Token **rest, Token *tok, Type *basety,
   int i = 0;
 
   while (!equal(tok, ";")) {
-    if (i++ > 0)
-      tok = skip(tok, ",");
+    if (i++ > 0) {
+      // Only a comma or a semicolon may follow a declarator. Reporting the
+      // comma alone is technically true and unhelpful: the mistake is almost
+      // always a missing semicolon, so the message should name that first.
+      if (!equal(tok, ","))
+        error_tok(tok, "expected ';' or ',' after the declaration");
+      tok = tok->next;
+    }
 
     Type *ty = declarator(&tok, tok, basety);
     if (ty->kind == TY_VOID)
