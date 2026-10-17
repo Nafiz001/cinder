@@ -118,7 +118,7 @@ Requires a C compiler, plus GNU `as` and `ld` for the output. On Windows,
 MinGW-w64 provides all three.
 
 ```sh
-git clone https://github.com/nafizahmed/cinder
+git clone https://github.com/Nafiz001/cinder
 cd cinder
 make            # or ./build.sh, if make is not installed
 ```
